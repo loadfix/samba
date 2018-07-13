@@ -1,0 +1,92 @@
+--- samba-4.7.5.orig/source3/modules/vfs_shadow_copy2.c	2017-07-04 12:05:25.000000000 +0200
++++ samba-4.7.5/source3/modules/vfs_shadow_copy2.c	2018-03-09 10:05:17.524283183 +0100
+@@ -279,9 +279,14 @@
+ 			return -1;
+ 		}
+ 	} else {
+-		if (config->use_localtime) {
++		/*
++		 * In case the rexec option is used we will have to search
++		 * the list of snapshots. As it's stored in GMT we cannot
++		 * convert to localtime as in the other case.
++		 */
++		if (config->use_localtime && priv->snaps->regex == NULL) {
+ 			if (localtime_r(&snapshot, &snap_tm) == 0) {
+-				DEBUG(10, ("gmtime_r failed\n"));
++				DEBUG(10, ("localtime_r failed\n"));
+ 				return -1;
+ 			}
+ 		} else {
+@@ -1918,6 +1923,7 @@
+ 	char *tmp = NULL;
+ 	bool converted = false;
+ 	int ret = -1;
++	regmatch_t pmatch[1];
+ 
+ 	SMB_VFS_HANDLE_GET_DATA(handle, priv, struct shadow_copy2_private,
+ 				return NULL);
+@@ -1930,27 +1936,46 @@
+ 	 * If regex is provided, then we will have to parse the
+ 	 * filename which will contain both the prefix and the time format.
+ 	 * e.g. <prefix><delimiter><time_format>
++	 *
++	 * As an extension of that we match and trim the regex <prefix
++	 * when delimiter is set to an empty string. This allows for
++	 * more flexible snapshot naming and more readable time
++	 * format strings.
+ 	 */
+ 	if (priv->snaps->regex != NULL) {
+-		tmpstr = talloc_strdup(talloc_tos(), name);
+-		/* point "name" to the time format */
+-		name = strstr(name, priv->config->delimiter);
+-		if (name == NULL) {
+-			goto done;
+-		}
+-		/* Extract the prefix */
+-		tmp = strstr(tmpstr, priv->config->delimiter);
+-		if (tmp == NULL) {
+-			goto done;
+-		}
+-		*tmp = '\0';
++		if (priv->config->delimiter != NULL && *(priv->config->delimiter)) {
++			tmpstr = talloc_strdup(talloc_tos(), name);
++			/* point "name" to the time format */
++			name = strstr(name, priv->config->delimiter);
++			if (name == NULL) {
++				goto done;
++			}
++			/* Extract the prefix */
++			tmp = strstr(tmpstr, priv->config->delimiter);
++			if (tmp == NULL) {
++				goto done;
++			}
++			*tmp = '\0';
+ 
+-		/* Parse regex */
+-		ret = regexec(priv->snaps->regex, tmpstr, 0, NULL, 0);
+-		if (ret) {
+-			DBG_DEBUG("shadow_copy2_snapshot_to_gmt: "
+-				  "no regex match for %s\n", tmpstr);
+-			goto done;
++			/* Parse regex */
++			ret = regexec(priv->snaps->regex, tmpstr, 0, NULL, 0);
++			if (ret) {
++				DBG_DEBUG("shadow_copy2_snapshot_to_gmt: "
++					  "no regex match for %s\n", tmpstr);
++				goto done;
++			}
++		} else {
++			/* Parse regex */
++			ret = regexec(priv->snaps->regex, name, 1, pmatch, 0);
++			if (ret) {
++				DBG_DEBUG("shadow_copy2_snapshot_to_gmt: "
++					  "no regex match for %s\n", tmpstr);
++				goto done;
++			}
++			/* point "name" to time format right after the regex match */
++			if (pmatch[0].rm_eo > 0) {
++				name += pmatch[0].rm_eo;
++			}
+ 		}
+ 	}
+ 

@@ -1,0 +1,17 @@
+[Unit]
+Description=Samba Winbind Service
+Documentation=man:winbindd(8)
+After=network.target
+
+[Service]
+Type=forking
+NotifyAccess=all
+PIDFile=/opt/samba-4.8.3/var/run/samba/winbindd.pid
+LimitNOFILE=16384
+EnvironmentFile=-/etc/default/samba
+ExecStart=/opt/samba-4.8.3/sbin/winbindd
+ExecReload=/bin/kill -HUP $MAINPID
+LimitCORE=infinity
+
+[Install]
+WantedBy=multi-user.target
